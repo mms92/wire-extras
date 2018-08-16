@@ -26,6 +26,8 @@ TOOL.ClientConVar[ "color_b" ] = "255"
 
 cleanup.Register( "wireconstraints" )
 
+local von = WireLib.von
+
 local Components = {}
 
 local function IsWire(entity) --try to find out if the entity is wire
@@ -107,7 +109,7 @@ if CLIENT then
 		UnWireTable = {}
 		GUIWiring_DisplayWires = {}
 	end
-	usermessage.Hook("GUIWiring_Start",GUIWiring_RecvStart)
+	net.Receive("GUIWiring_Start",GUIWiring_RecvStart)
 	
 	local function GUIWiring_RecvEntPart()
 		local ent = net.ReadEntity()
@@ -115,8 +117,7 @@ if CLIENT then
 		if not (IsWire(ent)) then return end
 
 		local strMsg = net.ReadString()
-		
-		Components = {}
+
 		Components[ent] = von.deserialize( strMsg )
 	end
 	net.Receive("GUIWiring_EntPart",GUIWiring_RecvEntPart)
@@ -124,7 +125,7 @@ if CLIENT then
 	local function GUIWiring_RecvEnd()
 		GUIWiring_ShowGUI()
 	end
-	usermessage.Hook("GUIWiring_End",GUIWiring_RecvEnd)
+	net.Receive("GUIWiring_End",GUIWiring_RecvEnd)
 	
 	local function GUIWiring_RecvWL(um)
 		local ent = um:ReadEntity()
@@ -137,7 +138,7 @@ if CLIENT then
 		btn:SetPort(ent,dat)
 		DWLMakers[tostring(ent)] = nil
 	end
-	usermessage.Hook("GUIWiring_WL",GUIWiring_RecvWL)
+	net.Receive("GUIWiring_WL",GUIWiring_RecvWL)
 	
 	local function GUIWiring_Perform()
 		RunConsoleCommand("gui_wiring_start")
@@ -494,8 +495,8 @@ function TOOL:Reload(trace)
 	if CLIENT then return end
 	local ply = self:GetOwner()
 	if not Components[ply] then return end
-	umsg.Start("GUIWiring_Start",ply)
-	umsg.End()
+	net.Start("GUIWiring_Start")
+	net.Send( ply )
 	for _,v in pairs(Components[ply]) do
 		local stbl = von.serialize( {v.Inputs,v.Outputs,v.WireDebugName,v.extended} )
 
@@ -504,12 +505,15 @@ function TOOL:Reload(trace)
 			net.WriteString( stbl )
 		net.Send( ply )
 	end
-	umsg.Start("GUIWiring_End",ply)
-	umsg.End()
+	net.Start("GUIWiring_End")
+	net.Send( ply )
 end
 
 if SERVER then
 	util.AddNetworkString( "GUIWiring_EntPart" )
+	util.AddNetworkString( "GUIWiring_Start")
+	util.AddNetworkString( "GUIWiring_End")
+	util.AddNetworkString( "GUIWiring_WL")
 	
 	local material = {}
 	local color = {}
@@ -520,12 +524,12 @@ if SERVER then
 		if not table.HasValue(Components[ply],ent) then return end
 		if ent.extended then return end
 		ent.extended = true
-		RefreshSpecialOutputs(ent)
-		if not ent.Outputs["link"] then return end
-		umsg.Start("GUIWiring_WL",ply)
-			umsg.Entity(ent)
-			umsg.String( von.serialize( ent.Outputs["link"] ) )
-		umsg.End()
+		Wirelib.CreateWirelinkOutput( ply, ent, {true} )
+		if not ent.Outputs["wirelink"] then return end
+		net.Start("GUIWiring_WL")
+			net.WriteEntity(ent)
+			net.WriteString( von.serialize( ent.Outputs["wirelink"] ) )
+		net.Send( ply )
 	end
 	local function GUIWring_WirelinkCmd(ply,cmd,args)
 		if not (#args == 1 and ply:IsValid() and ply:IsPlayer()) then return end
